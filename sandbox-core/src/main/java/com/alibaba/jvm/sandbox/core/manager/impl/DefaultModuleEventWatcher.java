@@ -230,9 +230,6 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
         final int watchId = watchIdSequencer.next();
 
         WatchIdHolder.addWaitingWatchId(watchId);
-        // 给对应的模块追加ClassFileTransformer
-        final SandboxClassFileTransformer sandClassFileTransformer = new SandboxClassFileTransformer(inst,
-                watchId, coreModule.getUniqueId(), matcher, listener, isEnableUnsafe, eventType, namespace);
 
         // 这里添加一下懒加载
         if (lazyReload) {
@@ -243,8 +240,6 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
         }
 
 
-        //这里addTransformer后，接下来引起的类加载都会经过sandClassFileTransformer
-        inst.addTransformer(sandClassFileTransformer, true);
         // 查找需要渲染的类集合
         final List<Class<?>> waitingReTransformClasses = classDataSource.findForReTransform(matcher);
         logger.info("watch={} in module={} found {} classes for watch(ing).",
