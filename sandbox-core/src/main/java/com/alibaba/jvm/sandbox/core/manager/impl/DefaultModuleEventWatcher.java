@@ -9,8 +9,10 @@ import com.alibaba.jvm.sandbox.api.resource.ModuleEventWatcher;
 import com.alibaba.jvm.sandbox.core.CoreModule;
 import com.alibaba.jvm.sandbox.core.enhance.weaver.EventListenerHandler;
 import com.alibaba.jvm.sandbox.core.manager.CoreLoadedClassDataSource;
+import com.alibaba.jvm.sandbox.core.manager.async.AsyncSandboxClassFileTransformerWrapper;
 import com.alibaba.jvm.sandbox.core.manager.async.TransformationManager;
 import com.alibaba.jvm.sandbox.core.manager.async.TransformationQuintuple;
+import com.alibaba.jvm.sandbox.core.util.PlatformDependentUtil;
 import com.alibaba.jvm.sandbox.core.util.SandboxProtector;
 import com.alibaba.jvm.sandbox.core.util.Sequencer;
 import com.alibaba.jvm.sandbox.core.util.matcher.ExtFilterMatcher;
@@ -20,6 +22,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -44,6 +47,9 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
     private final boolean isEnableUnsafe;
     private final String namespace;
     private final TransformationManager transformationManager;
+
+    private static final Boolean isAysncTransformEnabled =
+            Boolean.valueOf(PlatformDependentUtil.get("jvm.sandbox.transform.async.enabled", "false"));
 
     // 观察ID序列生成器
     private final Sequencer watchIdSequencer = new Sequencer();
@@ -89,9 +95,9 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
      * 形变观察所影响的类
      */
     private void reTransformClasses(
-        final int watchId,
-        final List<Class<?>> waitingReTransformClasses,
-        final Progress progress) {
+            final int watchId,
+            final List<Class<?>> waitingReTransformClasses,
+            final Progress progress) {
         // 需要形变总数
         final int total = waitingReTransformClasses.size();
 
@@ -247,7 +253,7 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
                 waitingReTransformClasses.size()
         );
 
-        _transform(watchId, matcher, listener, progress, waitingReTransformClasses, eventType);
+        transform(watchId, matcher, listener, progress, waitingReTransformClasses, eventType);
 
         return watchId;
     }
@@ -304,12 +310,12 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
         }
     }
 
-    private void _transform(final int watchId,
-                            final Matcher matcher,
-                            final EventListener listener,
-                            final Progress progress,
-                            final List<Class<?>> waitingReTransformClasses,
-                            final Event.Type... eventType) {
+    public void transform(final int watchId,
+                          final Matcher matcher,
+                          final EventListener listener,
+                          final Progress progress,
+                          final List<Class<?>> waitingReTransformClasses,
+                          final Event.Type... eventType) {
 
         SandboxProtector.getOrCreateInstance().enterProtecting();
 
@@ -323,7 +329,14 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
             coreModule.getSandboxClassFileTransformers().add(sandClassFileTransformer);
 
             //这里addTransformer后，接下来引起的类加载都会经过sandClassFileTransformer
-            inst.addTransformer(sandClassFileTransformer, true);
+
+            if(isAysncTransformEnabled) {
+                ClassFileTransformer classFileTransformer = new AsyncSandboxClassFileTransformerWrapper(sandClassFileTransformer);
+                inst.addTransformer(classFileTransformer, true);
+            } else {
+                inst.addTransformer(sandClassFileTransformer, true);
+            }
+
             int cCnt = 0, mCnt = 0;
 
             // 进度通知启动
@@ -348,7 +361,7 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
                 finishProgress(progress, cCnt, mCnt);
             }
 
-        } finally  {
+        } finally {
 
             SandboxProtector.getOrCreateInstance().exitProtecting();
 
@@ -370,7 +383,7 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
                     waitingReTransformClasses.size()
             );
 
-            _transform(quintuple.getWatchId(),
+            transform(quintuple.getWatchId(),
                     quintuple.getMatcher(),
                     quintuple.getListener(),
                     quintuple.getProgress(),
