@@ -214,6 +214,15 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
         return affectStatistic;
     }
 
+    /**
+     * Get Instrumentation
+     *
+     * @return instrumentation
+     */
+    public Instrumentation getInstrument() {
+        return inst;
+    }
+
     @Override
     public String getNativeMethodPrefix() {
         return EventWeaver.NATIVE_PREFIX;

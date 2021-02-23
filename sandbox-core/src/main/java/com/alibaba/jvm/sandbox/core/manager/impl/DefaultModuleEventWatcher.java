@@ -9,7 +9,6 @@ import com.alibaba.jvm.sandbox.api.resource.ModuleEventWatcher;
 import com.alibaba.jvm.sandbox.core.CoreModule;
 import com.alibaba.jvm.sandbox.core.enhance.weaver.EventListenerHandler;
 import com.alibaba.jvm.sandbox.core.manager.CoreLoadedClassDataSource;
-import com.alibaba.jvm.sandbox.core.manager.async.AsyncSandboxClassFileTransformerWrapper;
 import com.alibaba.jvm.sandbox.core.manager.async.TransformationManager;
 import com.alibaba.jvm.sandbox.core.manager.async.TransformationQuintuple;
 import com.alibaba.jvm.sandbox.core.util.PlatformDependentUtil;
@@ -22,7 +21,6 @@ import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -316,19 +314,30 @@ public class DefaultModuleEventWatcher implements ModuleEventWatcher {
 
         try {
 
-            // 给对应的模块追加ClassFileTransformer
-            final SandboxClassFileTransformer sandClassFileTransformer = new SandboxClassFileTransformer(
-                    inst, watchId, coreModule.getUniqueId(), matcher, listener, isEnableUnsafe, eventType, namespace);
-
-            // 注册到CoreModule中
-            coreModule.getSandboxClassFileTransformers().add(sandClassFileTransformer);
-
-            //这里addTransformer后，接下来引起的类加载都会经过sandClassFileTransformer
+            final SandboxClassFileTransformer sandClassFileTransformer;
 
             if(isAysncTransformEnabled) {
-                ClassFileTransformer classFileTransformer = new AsyncSandboxClassFileTransformerWrapper(sandClassFileTransformer);
-                inst.addTransformer(classFileTransformer, true);
+                // 给对应的模块追加ClassFileTransformer
+                sandClassFileTransformer = new AsyncSandboxClassFileTransformerWrapper(
+                        inst, watchId, coreModule.getUniqueId(), matcher, listener, isEnableUnsafe, eventType, namespace);
+
+                // 注册到CoreModule中
+                coreModule.getSandboxClassFileTransformers().add(sandClassFileTransformer);
+
+                //这里addTransformer后，接下来引起的类加载都会经过sandClassFileTransformer
+                inst.addTransformer(sandClassFileTransformer, true);
+
             } else {
+
+                // 给对应的模块追加ClassFileTransformer
+                sandClassFileTransformer = new SandboxClassFileTransformer(
+                        inst, watchId, coreModule.getUniqueId(), matcher, listener, isEnableUnsafe, eventType, namespace);
+
+                // 注册到CoreModule中
+                coreModule.getSandboxClassFileTransformers().add(sandClassFileTransformer);
+
+                //这里addTransformer后，接下来引起的类加载都会经过sandClassFileTransformer
+
                 inst.addTransformer(sandClassFileTransformer, true);
             }
 
