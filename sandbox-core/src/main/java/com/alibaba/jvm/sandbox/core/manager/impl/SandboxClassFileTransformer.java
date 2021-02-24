@@ -13,12 +13,14 @@ import com.alibaba.jvm.sandbox.core.util.matcher.Matcher;
 import com.alibaba.jvm.sandbox.core.util.matcher.MatchingResult;
 import com.alibaba.jvm.sandbox.core.util.matcher.UnsupportedMatcher;
 import com.alibaba.jvm.sandbox.core.util.matcher.structure.ClassStructure;
+import org.apache.commons.lang3.tuple.Triple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.security.ProtectionDomain;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -45,7 +47,14 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
     private final String namespace;
     private final int listenerId;
     private final AffectStatistic affectStatistic = new AffectStatistic();
-    private boolean nativePrefix = false;
+
+    // triple: classloader - classname - isComeFromSandboxFamily
+    private final ThreadLocal<Triple<ClassLoader, String, Boolean>> isComeFromSandboxFamily =
+            new ThreadLocal<Triple<ClassLoader, String, Boolean>>() {
+                protected Triple<ClassLoader, String, Boolean> initialValue() {
+                    return Triple.of(null, null, false);
+                }
+            };
 
     SandboxClassFileTransformer(Instrumentation inst, final int watchId,
         final String uniqueId,
@@ -84,10 +93,23 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
 
         try {
 
-            // 这里过滤掉Sandbox所需要的类|来自SandboxClassLoader所加载的类|来自ModuleJarClassLoader加载的类
-            // 防止ClassCircularityError的发生
-            if (SandboxClassUtils.isComeFromSandboxFamily(internalClassName, loader)) {
-                return null;
+            Triple<ClassLoader, String, Boolean> classBooleanPair = isComeFromSandboxFamily.get();
+
+            ClassLoader classLoader = classBooleanPair.getLeft();
+            String classname = classBooleanPair.getMiddle();
+
+            if (Objects.equals(loader, classLoader) && Objects.equals(internalClassName, classname)) {
+                if (!classBooleanPair.getRight()) {
+                    return null;
+                }
+            } else {
+                // 这里过滤掉Sandbox所需要的类|来自SandboxClassLoader所加载的类|来自ModuleJarClassLoader加载的类
+                // 防止ClassCircularityError的发生
+                if (SandboxClassUtils.isComeFromSandboxFamily(internalClassName, loader)) {
+                    isComeFromSandboxFamily.set(Triple.of(classLoader, classname, false));
+                    return null;
+                }
+                isComeFromSandboxFamily.set(Triple.of(classLoader, classname, true));
             }
 
             return _transform(
