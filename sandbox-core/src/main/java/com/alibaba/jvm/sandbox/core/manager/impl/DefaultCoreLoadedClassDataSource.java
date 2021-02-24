@@ -182,9 +182,6 @@ public class DefaultCoreLoadedClassDataSource implements CoreLoadedClassDataSour
 
         try {
 
-            // 大量计算部分，需要非常小心处理性能问题，能不计算就不计算
-            final Iterator<Class<?>> itForLoaded = iteratorForLoadedClasses();
-
             // fork - join
 
             Class[] allLoadedClasses = inst.getAllLoadedClasses();
