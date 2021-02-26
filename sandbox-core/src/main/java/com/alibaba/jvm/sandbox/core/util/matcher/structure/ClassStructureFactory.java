@@ -4,6 +4,7 @@ package com.alibaba.jvm.sandbox.core.util.matcher.structure;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,6 +32,18 @@ public class ClassStructureFactory {
                 @Override
                 public ClassStructure load(Class<?> key) {
                     return new ClassStructureImplByJDK(key);
+                }
+            });
+
+    // 尽管Instrument获取array为native方法，JVM Spec中也没有定义，但是观察可以发现hotspot实现时，
+    // 当类代码没有改动，那么byte array地址是一致的。这意味着，byte array的比较只要考虑地址的比较也
+    // 可以获取大量的成功匹配，并可以避免array完全匹配带来的开销。
+    private final static LoadingCache<Pair<byte[], ClassLoader>, ClassStructure> CLASS_STRUCTURE_BY_ASM_CACHE
+            = CacheBuilder.newBuilder().expireAfterWrite(15, TimeUnit.MINUTES)
+            .maximumSize(128).build(new CacheLoader<Pair<byte[], ClassLoader>, ClassStructure>() {
+                @Override
+                public ClassStructure load(Pair<byte[], ClassLoader> pair) {
+                    return new ClassStructureImplByAsm(pair.getLeft(), pair.getRight());
                 }
             });
 
@@ -70,7 +83,7 @@ public class ClassStructureFactory {
      */
     public static ClassStructure createClassStructure(final byte[] classByteArray,
                                                       final ClassLoader loader) {
-        return new ClassStructureImplByAsm(classByteArray, loader);
+        return CLASS_STRUCTURE_BY_ASM_CACHE.getUnchecked(Pair.of(classByteArray, loader));
     }
 
 }

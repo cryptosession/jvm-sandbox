@@ -13,6 +13,7 @@ import com.alibaba.jvm.sandbox.core.util.matcher.Matcher;
 import com.alibaba.jvm.sandbox.core.util.matcher.MatchingResult;
 import com.alibaba.jvm.sandbox.core.util.matcher.UnsupportedMatcher;
 import com.alibaba.jvm.sandbox.core.util.matcher.structure.ClassStructure;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +57,14 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
                 }
             };
 
+    // triple: classloader - class - isComeFromSandboxFamily
+    private final ThreadLocal<Pair<Triple<ClassLoader, Class<?>, byte[]>, ClassStructure>> classStructureCache =
+            new ThreadLocal<Pair<Triple<ClassLoader, Class<?>, byte[]>, ClassStructure>>() {
+                protected Pair<Triple<ClassLoader, Class<?>, byte[]>, ClassStructure> initialValue() {
+                    return Pair.of(null, null);
+                }
+            };
+
     SandboxClassFileTransformer(Instrumentation inst, final int watchId,
         final String uniqueId,
         final Matcher matcher,
@@ -91,6 +100,13 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
                             final byte[] srcByteCodeArray) {
         SandboxProtector.getOrCreateInstance().enterProtecting();
 
+        // 如果未开启unsafe开关，是不允许增强来自BootStrapClassLoader的类
+        if (!isEnableUnsafe
+                && null == loader) {
+            logger.debug("transform ignore {}, class from bootstrap but unsafe.enable=false.", internalClassName);
+            return null;
+        }
+
         try {
 
             Triple<ClassLoader, String, Boolean> classBooleanPair = isComeFromSandboxFamily.get();
@@ -106,10 +122,10 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
                 // 这里过滤掉Sandbox所需要的类|来自SandboxClassLoader所加载的类|来自ModuleJarClassLoader加载的类
                 // 防止ClassCircularityError的发生
                 if (SandboxClassUtils.isComeFromSandboxFamily(internalClassName, loader)) {
-                    isComeFromSandboxFamily.set(Triple.of(classLoader, classname, false));
+                    isComeFromSandboxFamily.set(Triple.of(loader, internalClassName, false));
                     return null;
                 }
-                isComeFromSandboxFamily.set(Triple.of(classLoader, classname, true));
+                isComeFromSandboxFamily.set(Triple.of(loader, internalClassName, true));
             }
 
             return _transform(
@@ -138,14 +154,19 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
                               final String internalClassName,
                               final Class<?> classBeingRedefined,
                               final byte[] srcByteCodeArray) {
-        // 如果未开启unsafe开关，是不允许增强来自BootStrapClassLoader的类
-        if (!isEnableUnsafe
-                && null == loader) {
-            logger.debug("transform ignore {}, class from bootstrap but unsafe.enable=false.", internalClassName);
-            return null;
+
+
+        Pair<Triple<ClassLoader, Class<?>, byte[]>, ClassStructure> tripleClassStructurePair = classStructureCache.get();
+
+        Triple<ClassLoader, ? extends Class<?>, byte[]> triple = Triple.of(loader, classBeingRedefined, srcByteCodeArray);
+
+        final ClassStructure classStructure;
+        if (Objects.equals(tripleClassStructurePair.getLeft(), triple)) {
+            classStructure = tripleClassStructurePair.getRight();
+        } else {
+            classStructure = getClassStructure(loader, classBeingRedefined, srcByteCodeArray);
         }
 
-        final ClassStructure classStructure = getClassStructure(loader, classBeingRedefined, srcByteCodeArray);
         final MatchingResult matchingResult = new UnsupportedMatcher(loader, isEnableUnsafe).and(matcher).matching(classStructure);
 
         // 如果一个行为都没匹配上也不用继续了
@@ -261,5 +282,12 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
                 throw new UnsupportedOperationException("Native Method Prefix Unsupported");
             }
         }
+    }
+
+    public static void main(String[] args) {
+        char[] a= "sss".toCharArray();
+        char[] b= "sss".toCharArray();
+
+        System.out.println(Objects.equals(a, b));
     }
 }
