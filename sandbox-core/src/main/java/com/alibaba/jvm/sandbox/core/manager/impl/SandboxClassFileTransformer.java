@@ -50,7 +50,7 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
     private final AffectStatistic affectStatistic = new AffectStatistic();
 
     // triple: classloader - classname - isComeFromSandboxFamily
-    private final ThreadLocal<Triple<ClassLoader, String, Boolean>> isComeFromSandboxFamily =
+    private static final ThreadLocal<Triple<ClassLoader, String, Boolean>> isComeFromSandboxFamily =
             new ThreadLocal<Triple<ClassLoader, String, Boolean>>() {
                 protected Triple<ClassLoader, String, Boolean> initialValue() {
                     return Triple.of(null, null, false);
@@ -58,9 +58,9 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
             };
 
     // triple: classloader - class - isComeFromSandboxFamily
-    private final ThreadLocal<Pair<Triple<ClassLoader, Class<?>, byte[]>, ClassStructure>> classStructureCache =
-            new ThreadLocal<Pair<Triple<ClassLoader, Class<?>, byte[]>, ClassStructure>>() {
-                protected Pair<Triple<ClassLoader, Class<?>, byte[]>, ClassStructure> initialValue() {
+    private static final ThreadLocal<Pair<? extends Triple<ClassLoader, ? extends Class<?>, byte[]>, ClassStructure>> classStructureCache =
+            new ThreadLocal<Pair<? extends Triple<ClassLoader, ? extends Class<?>, byte[]>, ClassStructure>>() {
+                protected Pair<? extends Triple<ClassLoader, ? extends Class<?>, byte[]>, ClassStructure> initialValue() {
                     return Pair.of(null, null);
                 }
             };
@@ -156,15 +156,17 @@ public class SandboxClassFileTransformer implements ClassFileTransformer, Native
                               final byte[] srcByteCodeArray) {
 
 
-        Pair<Triple<ClassLoader, Class<?>, byte[]>, ClassStructure> tripleClassStructurePair = classStructureCache.get();
+        Pair<? extends Triple<ClassLoader, ? extends Class<?>, byte[]>, ClassStructure> tripleClassStructurePair = classStructureCache.get();
 
         Triple<ClassLoader, ? extends Class<?>, byte[]> triple = Triple.of(loader, classBeingRedefined, srcByteCodeArray);
 
         final ClassStructure classStructure;
-        if (Objects.equals(tripleClassStructurePair.getLeft(), triple)) {
+        Triple<ClassLoader, ? extends Class<?>, byte[]> theTriple = tripleClassStructurePair.getLeft();
+        if (Objects.equals(theTriple, triple)) {
             classStructure = tripleClassStructurePair.getRight();
         } else {
             classStructure = getClassStructure(loader, classBeingRedefined, srcByteCodeArray);
+            classStructureCache.set(Pair.of(triple, classStructure));
         }
 
         final MatchingResult matchingResult = new UnsupportedMatcher(loader, isEnableUnsafe).and(matcher).matching(classStructure);
